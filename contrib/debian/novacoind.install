@@ -1,0 +1,2 @@
+debian/bin/EventTokend usr/bin
+src/EventTokend usr/lib/EventToken
