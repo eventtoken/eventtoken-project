@@ -2,6 +2,7 @@
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+#include "main.h"
 
 #include "alert.h"
 #include "checkpoints.h"
@@ -993,18 +994,36 @@ int64_t GetProofOfWorkReward(int nHeight, int64_t nFees)
     return nSubsidy + nFees;
 }
 
+const int POS_BLOCK_BEFORE_FIX = 55000;
+const int POS_BLOCK_REWARD_FIX = 54999;
+
 // miner's coin stake reward based on coin age spent (coin-days)
-int64_t GetProofOfStakeReward(int64_t nCoinAge, int64_t nFees)
+int64_t GetProofOfStakeReward(const CBlockIndex* pindex, int64_t nCoinAge, int64_t nFees)
 {
     int64_t nRewardCoinYear;
 
     nRewardCoinYear = MAX_MINT_PROOF_OF_STAKE;
 
-    int64_t nSubsidy = nCoinAge * nRewardCoinYear / 365 / COIN;
+    int64_t nSubsidy = nCoinAge * COIN_YEAR_REWARD * 33 / (365 * 33 + 8);
+    if(pindex->nHeight < POS_BLOCK_BEFORE_FIX)
+	{
+
+		int64_t nSubsidy = nCoinAge * nRewardCoinYear / 365 / COIN;
+         return nSubsidy + nFees;
+
+    } else if (pindex->nHeight > POS_BLOCK_REWARD_FIX) {
+
+        int64_t nSubsidy = nCoinAge * COIN_YEAR_REWARD * 33 / (365 * 33 + 8);
+        return nSubsidy;
+
+    }
+
+
+    
 	
     if (fDebug && GetBoolArg("-printcreation"))
         printf("GetProofOfStakeReward(): create=%s nCoinAge=%"PRId64"\n", FormatMoney(nSubsidy).c_str(), nCoinAge);
-    return nSubsidy + nFees;
+    return nSubsidy;
 }
 
 static const int64_t nTargetTimespan = 21 * 60;  // 21 mins
@@ -1427,10 +1446,15 @@ bool CBlock::DisconnectBlock(CTxDB& txdb, CBlockIndex* pindex)
 
 bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
 {
+ 	  // Get prev block index 
+    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashPrevBlock); 
+    if (mi == mapBlockIndex.end()) 
+        return DoS(10, error("AcceptBlock() : prev block not found")); 
+    CBlockIndex* pindexPrev = (*mi).second; 
     // Check it again in case a previous version let a bad block in, but skip BlockSig checking
     if (!CheckBlock(!fJustCheck, !fJustCheck, false))
         return false;
-
+	
     //// issue here: it doesn't know the version
     unsigned int nTxPos;
     if (fJustCheck)
@@ -1525,7 +1549,7 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
         if (!vtx[1].GetCoinAge(txdb, nCoinAge))
             return error("ConnectBlock() : %s unable to get coin age for coinstake", vtx[1].GetHash().ToString().substr(0,10).c_str());
 
-        int64_t nCalculatedStakeReward = GetProofOfStakeReward(nCoinAge, nFees);
+        int64_t nCalculatedStakeReward = GetProofOfStakeReward(pindexPrev, nCoinAge, nFees);
 
         if (nStakeReward > nCalculatedStakeReward)
             return DoS(100, error("ConnectBlock() : coinstake pays too much(actual=%"PRId64" vs calculated=%"PRId64")", nStakeReward, nCalculatedStakeReward));
